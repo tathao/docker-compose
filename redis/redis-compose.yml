@@ -1,0 +1,32 @@
+services:
+  redis:
+    image: redis:latest
+    platform: linux/arm64
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - ./redis-data:/data
+    networks:
+      - my-external-network
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+
+  redis-insight:
+    image: redislabs/redisinsight:latest
+    platform: linux/arm64
+    container_name: redis-insight
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "8001:5540"
+    volumes:
+      - ./redis-insight-data:/db
+    networks:
+      - my-external-network
+
+
+networks:
+  my-external-network:
+    external: true
