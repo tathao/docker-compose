@@ -1,0 +1,56 @@
+# =====================================================================
+# 🐳 Docker Compose Smart Env (Multi-Service + Compose V2 + Colima)
+# =====================================================================
+function dcs() {
+    local target_service="$1"
+
+    if [[ -z "$target_service" ]]; then
+        echo "Usage: dcs <service>"
+        echo "Available services:"
+        find ./docker -maxdepth 1 -mindepth 1 -type d -exec basename {} \;
+        return 1
+    fi
+
+    local current_dir=$(pwd)
+    local project_root=""
+    local search_dir="$current_dir"
+    while [[ "$search_dir" != "/" ]]; do
+        if [[ -f "$search_dir/docker/.env" ]]; then
+            project_root="$search_dir"
+            break
+        fi
+        search_dir=$(dirname "$search_dir")
+    done
+
+    if [[ -z "$project_root" ]]; then
+        echo "❌ Cannot find docker/.env — please cd to project first."
+        return 1
+    fi
+
+    local target_path="$project_root/docker/$target_service"
+    if [[ ! -d "$target_path" ]]; then
+        echo "❌ Service '$target_service' doesn't exist in $project_root/docker/"
+        return 1
+    fi
+
+    cd "$target_path" || return
+    setup_compose_env
+    echo "🔁 Switched to service: $CURRENT_DOCKER_SERVICE"
+}
+
+# =====================================================================
+# 🧠 Utility: auto-start Colima if Docker daemon not running
+# =====================================================================
+function ensure_docker_running() {
+    if ! docker info >/dev/null 2>&1; then
+        echo "🚀 Starting Colima (Docker VM)..."
+        colima start >/dev/null 2>&1
+    fi
+}
+add-zsh-hook precmd ensure_docker_running
+
+# =====================================================================
+# 💅 Prompt: display current project & service
+# =====================================================================
+autoload -U colors && colors
+PROMPT='%{$fg[cyan]%}${COMPOSE_PROJECT_NAME:-no-proj}%{$reset_color%}:%{$fg[yellow]%}${CURRENT_DOCKER_SERVICE:-none}%{$reset_color%} %~ %# '
