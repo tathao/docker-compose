@@ -1,21 +1,20 @@
 # =====================================================================
-# 🐳 Docker Compose Smart Env (Multi-Service + Compose V2 + Colima)
+# 🐳 Smart Docker Compose Environment for multi-service projects
 # =====================================================================
-function dcs() {
-    local target_service="$1"
 
-    if [[ -z "$target_service" ]]; then
-        echo "Usage: dcs <service>"
-        echo "Available services:"
-        find ./docker -maxdepth 1 -mindepth 1 -type d -exec basename {} \;
-        return 1
-    fi
 
+function setup_compose_env() {
     local current_dir=$(pwd)
     local project_root=""
+    local compose_path=""
+    local env_path=""
+    local project_name=""
+    local service_name=""
+    local network_name=""
+
     local search_dir="$current_dir"
     while [[ "$search_dir" != "/" ]]; do
-        if [[ -f "$search_dir/docker/.env" ]]; then
+        if [[ -f "$search_dir/docker-compose/.env" ]]; then
             project_root="$search_dir"
             break
         fi
@@ -23,13 +22,88 @@ function dcs() {
     done
 
     if [[ -z "$project_root" ]]; then
-        echo "❌ Cannot find docker/.env — please cd to project first."
+        unset COMPOSE_PROJECT_NAME COMPOSE_FILE COMPOSE_ENV_FILE CURRENT_DOCKER_SERVICE
+        return
+    fi
+
+    project_name=$(basename "$(realpath "$project_root")")
+    env_path="$project_root/docker-compose/.env"
+
+    if [[ "$current_dir" == *"/docker-compose/"* ]]; then
+        local after_docker=${current_dir#*$project_root/docker-compose/}
+        local maybe_service=$(echo "$after_docker" | cut -d'/' -f1)
+        if [[ -f "$project_root/docker-compose/$maybe_service/docker-compose.yml" ]]; then
+            service_name="$maybe_service"
+            compose_path="$project_root/docker-compose/$service_name/docker-compose.yml"
+        fi
+    fi
+
+    if [[ -z "$compose_path" && -f "$project_root/docker-compose/docker-compose.yml" ]]; then
+        compose_path="$project_root/docker-compose/docker-compose.yml"
+    fi
+
+    if [[ -f "$env_path" ]]; then
+        network_name=$(grep -E '^NETWORK_NAME=' "$env_path" | cut -d '=' -f2)
+    fi
+
+    export COMPOSE_PROJECT_NAME=$project_name
+    export COMPOSE_FILE=$compose_path
+    export COMPOSE_ENV_FILE=$env_path
+    export CURRENT_DOCKER_SERVICE=${service_name:-root}
+
+    if [[ -n "$network_name" ]]; then
+        if ! docker network inspect "$network_name" >/dev/null 2>&1; then
+            echo "🌐 Creating missing network '$network_name'..."
+            docker network create "$network_name" >/dev/null
+        fi
+    fi
+}
+
+autoload -U add-zsh-hook
+add-zsh-hook chpwd setup_compose_env
+setup_compose_env
+
+# =====================================================================
+# ⚙️ Docker Compose V2 Aliases
+# =====================================================================
+alias dcu='docker compose --env-file ${COMPOSE_ENV_FILE:-.env} -f ${COMPOSE_FILE:-docker-compose.yml} up -d'
+alias dcd='docker compose --env-file ${COMPOSE_ENV_FILE:-.env} -f ${COMPOSE_FILE:-docker-compose.yml} down'
+alias dcl='docker compose --env-file ${COMPOSE_ENV_FILE:-.env} -f ${COMPOSE_FILE:-docker-compose.yml} logs -f'
+alias dps='docker ps --filter "name=${COMPOSE_PROJECT_NAME}"'
+alias dbash='docker exec -it $(docker ps --filter "name=${COMPOSE_PROJECT_NAME}" --format "{{.Names}}" | head -n 1) bash'
+
+# =====================================================================
+# 🔁 dcs <service> — nhanh chóng chuyển service trong docker/
+# =====================================================================
+function dcs() {
+    local target_service="$1"
+
+    if [[ -z "$target_service" ]]; then
+        echo "Usage: dcs <service>"
+        echo "Available services:"
+        find ./docker-compose -maxdepth 1 -mindepth 1 -type d -exec basename {} \;
         return 1
     fi
 
-    local target_path="$project_root/docker/$target_service"
+    local current_dir=$(pwd)
+    local project_root=""
+    local search_dir="$current_dir"
+    while [[ "$search_dir" != "/" ]]; do
+        if [[ -f "$search_dir/docker-compose/.env" ]]; then
+            project_root="$search_dir"
+            break
+        fi
+        search_dir=$(dirname "$search_dir")
+    done
+
+    if [[ -z "$project_root" ]]; then
+        echo "❌ Cannot find docker-compose/.env - please cd to project first."
+        return 1
+    fi
+
+    local target_path="$project_root/docker-compose/$target_service"
     if [[ ! -d "$target_path" ]]; then
-        echo "❌ Service '$target_service' doesn't exist in $project_root/docker/"
+        echo "❌ Service '$target_service' doesn't exist in $project_root/docker-compose/"
         return 1
     fi
 
@@ -39,7 +113,7 @@ function dcs() {
 }
 
 # =====================================================================
-# 🧠 Utility: auto-start Colima if Docker daemon not running
+# 🧠 Auto-start Colima (nếu Docker daemon chưa chạy)
 # =====================================================================
 function ensure_docker_running() {
     if ! docker info >/dev/null 2>&1; then
@@ -50,7 +124,7 @@ function ensure_docker_running() {
 add-zsh-hook precmd ensure_docker_running
 
 # =====================================================================
-# 💅 Prompt: display current project & service
+# 💅 Prompt hiển thị thông minh
 # =====================================================================
 autoload -U colors && colors
 PROMPT='%{$fg[cyan]%}${COMPOSE_PROJECT_NAME:-no-proj}%{$reset_color%}:%{$fg[yellow]%}${CURRENT_DOCKER_SERVICE:-none}%{$reset_color%} %~ %# '
